@@ -3,7 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -40,27 +44,49 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 
 	thumbnail_file, thumbnail_header, err := r.FormFile("thumbnail")
-	media_type := thumbnail_header.Header.Get("Content-Type")
-	thumbnail_bytes, err := io.ReadAll(thumbnail_file)
+	mediaType := thumbnail_header.Header.Get("Content-Type")
+	parsedMediaType, _, err := mime.ParseMediaType(mediaType)
+
+	allowedType := []string{
+		"image/jpeg",
+		"image/png",
+	}
+
+	if !slices.Contains(allowedType, parsedMediaType) {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Invalid media type: %v", parsedMediaType), fmt.Errorf("Invalid media type: %v", parsedMediaType))
+		return
+	}
 
 	video_metadata, err := cfg.db.GetVideo(videoID)
 
 	if video_metadata.CreateVideoParams.UserID != userID {
 		respondWithError(w, http.StatusUnauthorized, "User is not the author.", fmt.Errorf("UserID does not match authorID"))
+		return
 	}
 
-	thumbnail := thumbnail{
-		data:      thumbnail_bytes,
-		mediaType: media_type,
+	extensions, err := mime.ExtensionsByType(mediaType)
+	if err != nil || len(extensions) == 0 {
+		respondWithError(w, http.StatusInternalServerError, "Error determining extension", err)
+		return
 	}
-	videoThumbnails[videoID] = thumbnail
+	thumbnail_filename := fmt.Sprintf("%v%v", videoIDString, extensions[0])
+	thumbnail_filepath := filepath.Join(cfg.assetsRoot, thumbnail_filename)
 
-	thumbnail_url := fmt.Sprintf("http://localhost:%v/api/thumbnails/%v", cfg.port, videoIDString)
+	file_on_disc, err := os.Create(thumbnail_filepath)
+
+	size, err := io.Copy(file_on_disc, thumbnail_file)
+	if err != nil || size == 0 {
+		respondWithError(w, http.StatusInternalServerError, "Error writing to disk", err)
+		return
+	}
+
+	thumbnail_url := fmt.Sprintf("http://localhost:%v/assets/%v", cfg.port, thumbnail_filename)
 	video_metadata.ThumbnailURL = &thumbnail_url
 
 	err = cfg.db.UpdateVideo(video_metadata)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error Updating Video", err)
+		return
 	}
 
 	respondWithJSON(w, http.StatusOK, video_metadata)

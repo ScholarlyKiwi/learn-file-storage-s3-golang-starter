@@ -4,3 +4,4 @@ out
 assets/
 samples/
 .env.example
+example_test.go
