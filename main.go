@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type apiConfig struct {
@@ -22,6 +26,7 @@ type apiConfig struct {
 	s3Region         string
 	s3CfDistribution string
 	port             string
+	s3client         *s3.Client
 }
 
 type thumbnail struct {
@@ -84,6 +89,13 @@ func main() {
 		log.Fatal("PORT environment variable is not set")
 	}
 
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(s3Region))
+	if err != nil {
+		log.Fatalf("AWS Config failed to load: %v", err)
+	}
+
+	s3Cli := s3.NewFromConfig(awsConfig)
+
 	cfg := apiConfig{
 		db:               db,
 		jwtSecret:        jwtSecret,
@@ -94,6 +106,7 @@ func main() {
 		s3Region:         s3Region,
 		s3CfDistribution: s3CfDistribution,
 		port:             port,
+		s3client:         s3Cli,
 	}
 
 	err = cfg.ensureAssetsDir()
@@ -106,7 +119,7 @@ func main() {
 	mux.Handle("/app/", appHandler)
 
 	assetsHandler := http.StripPrefix("/assets", http.FileServer(http.Dir(assetsRoot)))
-	mux.Handle("/assets/", cacheMiddleware(assetsHandler))
+	mux.Handle("/assets/", noCacheMiddleware(assetsHandler))
 
 	mux.HandleFunc("POST /api/login", cfg.handlerLogin)
 	mux.HandleFunc("POST /api/refresh", cfg.handlerRefresh)

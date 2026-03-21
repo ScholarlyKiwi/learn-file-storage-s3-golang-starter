@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
@@ -44,6 +46,11 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 
 	thumbnail_file, thumbnail_header, err := r.FormFile("thumbnail")
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Invalid reading thumbnail", err)
+		return
+	}
+	defer thumbnail_file.Close()
 	mediaType := thumbnail_header.Header.Get("Content-Type")
 	parsedMediaType, _, err := mime.ParseMediaType(mediaType)
 
@@ -59,6 +66,11 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	video_metadata, err := cfg.db.GetVideo(videoID)
 
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Error retrieving video metavideo: %v", err)
+		return
+	}
+
 	if video_metadata.CreateVideoParams.UserID != userID {
 		respondWithError(w, http.StatusUnauthorized, "User is not the author.", fmt.Errorf("UserID does not match authorID"))
 		return
@@ -69,10 +81,19 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusInternalServerError, "Error determining extension", err)
 		return
 	}
-	thumbnail_filename := fmt.Sprintf("%v%v", videoIDString, extensions[0])
+
+	random_filename := make([]byte, 32)
+	rand.Read(random_filename)
+	filename := base64.URLEncoding.EncodeToString(random_filename)
+	thumbnail_filename := fmt.Sprintf("%v%v", filename, extensions[0])
 	thumbnail_filepath := filepath.Join(cfg.assetsRoot, thumbnail_filename)
 
 	file_on_disc, err := os.Create(thumbnail_filepath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error create temp file", err)
+		return
+	}
+	defer file_on_disc.Close()
 
 	size, err := io.Copy(file_on_disc, thumbnail_file)
 	if err != nil || size == 0 {
