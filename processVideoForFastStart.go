@@ -13,7 +13,6 @@ func processVideoForFastStart(filePath string) (string, error) {
 	ffmpeg_cmd := exec.Command("ffmpeg", "-i", filePath, "-c", "copy", "-movflags", "faststart", "-f", "mp4", outputPath)
 	ffmpeg_cmd.Stdout = &output
 	err := ffmpeg_cmd.Run()
-	fmt.Println(ffmpeg_cmd)
 	if err != nil {
 		return "", fmt.Errorf("Error processing video for fast start: %v", err)
 	}
